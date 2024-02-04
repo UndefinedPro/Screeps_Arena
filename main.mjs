@@ -1,14 +1,17 @@
-import { ATTACK, CARRY, ERR_NOT_IN_RANGE, MOVE, RANGED_ATTACK, RESOURCE_ENERGY, TERRAIN_PLAIN, WORK } from "game/constants";
+import { ATTACK, CARRY, ERR_NOT_IN_RANGE, HEAL, MOVE, RANGED_ATTACK, RESOURCE_ENERGY, TERRAIN_PLAIN, WORK } from "game/constants";
 import { Creep, Source, StructureContainer, StructureSpawn } from "game/prototypes";
 import { findClosestByRange, getObjectsByPrototype, getRange, getTerrainAt } from "game/utils";
 import {HaverstCreep} from "./Worker.mjs"
 import {AttackEnenmy} from "./Attacker.mjs"
+import {Team1_Attack} from "./BattleTeam.mjs"
+import { HealMyCreep } from "./Healer.mjs";
 
-
-var AttackerArray = new Array();
-var AttackerTeamArray = new Array();
+var BattleArray = new Array();
+var BattleTeamArray = new Array();
+var BattleTeamRallyState = new Array();
 var RallyPoint = {x : 0, y:0};
 var InitIsFinished = false;
+var GroupSize = 5;          // 每个攻击组的成员数量
 
 export function loop(){
                                  
@@ -26,7 +29,7 @@ export function loop(){
     // ============ 初始化 ============ //
     if(!InitIsFinished){
         // 建立集结点(菱形范围内搜寻)
-        const SEARCH_RANGE = 8;
+        const SEARCH_RANGE = 5;
         // 菱形上半
         for(let i = -SEARCH_RANGE; i< SEARCH_RANGE; ++i){
             RallyPoint.x = MySpawn.x + i;
@@ -50,25 +53,44 @@ export function loop(){
         MySpawn.spawnCreep([WORK,MOVE,CARRY]).object;
     }
     else{
-        var newCreep = MySpawn.spawnCreep([ATTACK,MOVE,MOVE,MOVE,MOVE]).object;
+        if((MyCreeps.length - 3) % GroupSize == (GroupSize - 1)){
+            var newCreep = MySpawn.spawnCreep([HEAL,MOVE,MOVE,MOVE,MOVE,MOVE]).object;    
+        }
+        else{
+            var newCreep = MySpawn.spawnCreep([ATTACK,MOVE,MOVE,ATTACK,MOVE,MOVE]).object;
+        }
         if(newCreep){
-            AttackerArray.push(newCreep);
-            // 生产后进行攻击手分组
-            if(AttackerArray.length % 4 == 0){
-                AttackerTeamArray.push({member1:AttackerArray[AttackerArray.length - 1],
-                                        member2:AttackerArray[AttackerArray.length - 2],
-                                        member3:AttackerArray[AttackerArray.length - 3],
-                                        member4:AttackerArray[AttackerArray.length - 4]});    
+            BattleArray.push(newCreep);
+            // 生产后进行战斗小组分组
+            if(BattleArray.length % GroupSize == 0){
+                let BattleTeam = new Array();
+                // Team结构：Attacker,Attacker,Attacker,Attacker,Healer
+                for(let i = 0; i < GroupSize; ++i){
+                    BattleTeam.push(BattleArray[BattleArray.length - GroupSize + i]);
+                }
+                BattleTeamArray.push(BattleTeam);
+                BattleTeamRallyState.push(false);  
+                
             }
         }
     }
 
     // ============ 执行部分 ============ //
     // 到集结点集合
-    var re = AttackerArray.length % 4;
-    if(re != 0){
-        for(let i = 0; i < re; ++i){
-            AttackerArray[AttackerArray.length - 1 - i].moveTo(RallyPoint);
+    for(let i = 0; i < BattleTeamArray.length; ++i){
+        if(!BattleTeamRallyState[i]){
+            let RallyIsReady = true;
+            for(let j = 0; j < GroupSize; ++j){
+                if(getRange(BattleTeamArray[i][j], RallyPoint) > 2){
+                    // console.log(BattleTeamArray)
+                    BattleTeamArray[i][j].moveTo(RallyPoint);
+                    RallyIsReady = RallyIsReady && false;
+                }
+                else{
+                    RallyIsReady = RallyIsReady && true;
+                }
+            }
+            BattleTeamRallyState[i] = RallyIsReady;
         }
     }
     
@@ -81,66 +103,22 @@ export function loop(){
     }     
 
     // 进行分组攻击
-    if(EnemyCreeps.length > 0){
-        for(let i = 0; i < AttackerTeamArray.length; ++i){
-            if(AttackerTeamArray[i].member1.exists){
-                var TargetEnemy = findClosestByRange(AttackerTeamArray[i].member1,EnemyCreeps);
-                AttackEnenmy(AttackerTeamArray[i].member1, TargetEnemy);
-                AttackEnenmy(AttackerTeamArray[i].member2, TargetEnemy);
-                AttackEnenmy(AttackerTeamArray[i].member3, TargetEnemy);
-                AttackEnenmy(AttackerTeamArray[i].member4, TargetEnemy);
+    for(let i = 0; i < BattleTeamArray.length; ++i){
+        // 集结完毕才能攻击
+        if(BattleTeamRallyState[i]){
+            var CombatLoss = Team1_Attack(BattleTeamArray[i], EnemyCreeps, EnmmySpawn);
+            if(CombatLoss == 0){
+                BattleTeamArray.splice(i,1);
+                BattleTeamRallyState.splice(i,1);
             }
-            else if(AttackerTeamArray[i].member2.exists){
-                var TargetEnemy = findClosestByRange(AttackerTeamArray[i].member2,EnemyCreeps);
-                AttackEnenmy(AttackerTeamArray[i].member2, TargetEnemy);
-                AttackEnenmy(AttackerTeamArray[i].member3, TargetEnemy);
-                AttackEnenmy(AttackerTeamArray[i].member4, TargetEnemy);
-            }
-            else if(AttackerTeamArray[i].member3.exists){
-                var TargetEnemy = findClosestByRange(AttackerTeamArray[i].member3,EnemyCreeps);
-                AttackEnenmy(AttackerTeamArray[i].member3, TargetEnemy);
-                AttackEnenmy(AttackerTeamArray[i].member4, TargetEnemy);
-            }
-            else if(AttackerTeamArray[i].member4.exists){
-                var TargetEnemy = findClosestByRange(AttackerTeamArray[i].member4,EnemyCreeps);
-                AttackEnenmy(AttackerTeamArray[i].member4, TargetEnemy);
-            }
-            else{
-                AttackerTeamArray.splice(i,1);
-            }
-            
+            if(CombatLoss == 2){
+                let DamagedCreep = MyCreeps.filter(it => it.my && it.hits < it.hitsMax);
+                var HealerMembers = BattleTeamArray[i].filter(it => it.exists && it.body.some(bodyPart => bodyPart.type == HEAL));
+                for(var healermember of HealerMembers){
+                    HealMyCreep(DamagedCreep, healermember);
+                }
+            }   
         }
     }
-    else{
-        for(var attacker of AttackerArray){
-            AttackEnenmy(attacker, EnmmySpawn);
-        } 
-    }
-    /*
-    if(AttackerTeamArray.length > 0){
-        if(EnemyCreeps.length > 0){
-            if(EnemyCreeps.length > AttackerTeamArray.length){
-                for(let i = 0; i < AttackerTeamArray.length; ++i){
-                    AttackEnenmy(AttackerTeamArray[i].member1, EnemyCreeps[i]);
-                    AttackEnenmy(AttackerTeamArray[i].member2, EnemyCreeps[i]);
-                    AttackEnenmy(AttackerTeamArray[i].member3, EnemyCreeps[i]);
-                }
-            }
-            else{
-                for(let i = 0; i < EnemyCreeps.length; ++i){
-                    AttackEnenmy(AttackerTeamArray[i].member1, EnemyCreeps[i]);
-                    AttackEnenmy(AttackerTeamArray[i].member2, EnemyCreeps[i]);
-                    AttackEnenmy(AttackerTeamArray[i].member3, EnemyCreeps[i]);
-                }
-            }
-        }
-        else{
-            for(var attacker of AttackerArray){
-                AttackEnenmy(attacker, EnmmySpawn);
-        }  
-    }
-    }
-    */
-   
 }
     
